@@ -34,7 +34,7 @@ export interface SocialConfig {
   enabled: Record<Platform, boolean>;
 }
 
-function value(name: string): string { return (process.env[name] || "").trim(); }
+function value(name: string): string { return (process.env[name] || "").split(/\r?\n/).map((part) => part.trim()).find(Boolean) || ""; }
 function bool(name: string, fallback = false): boolean { const raw = value(name); return raw ? raw.toLowerCase() === "true" : fallback; }
 function vercelBaseUrl(): string { const host = value("VERCEL_URL"); return host ? `https://${host}` : ""; }
 

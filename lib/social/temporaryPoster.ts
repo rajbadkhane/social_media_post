@@ -1,30 +1,77 @@
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { del, put } from "@vercel/blob";
+import sharp from "sharp";
 import { getSocialConfig } from "../config";
 
 const maxPosterBytes = 8 * 1024 * 1024;
+const maxInstagramBlobBytes = 1_500_000;
 const pngSignature = "89504e470d0a1a0a";
 const activePosters = new Map<string, { path: string; expiresAt: number }>();
 
-export interface TemporaryPoster { token: string; path: string; expiresAt: number; sizeBytes: number }
+export interface TemporaryPoster {
+  token: string;
+  path: string;
+  url?: string;
+  storage: "blob" | "filesystem";
+  expiresAt: number;
+  sizeBytes: number;
+}
 
 function posterDirectory(): string { return path.resolve(process.env.TEMP_POSTER_DIRECTORY || (process.env.VERCEL ? path.join("/tmp", "runtime-posters") : path.join(process.cwd(), "runtime-posters"))); }
 function safePart(value: string): string { return value.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120); }
 function insideDirectory(filePath: string): boolean { const root = posterDirectory(); return filePath === root || filePath.startsWith(`${root}${path.sep}`); }
 function validatePng(buffer: Buffer): void { if (buffer.length > maxPosterBytes) throw new Error("Generated poster exceeds the 8 MB limit"); if (buffer.subarray(0, 8).toString("hex") !== pngSignature) throw new Error("Generated poster is not a valid PNG"); }
 
+async function instagramJpeg(buffer: Buffer): Promise<Buffer> {
+  let candidate = Buffer.alloc(0);
+  for (const quality of [85, 70, 55]) {
+    candidate = await sharp(buffer)
+      .resize({ width: 1080, withoutEnlargement: true })
+      .jpeg({ quality, mozjpeg: true })
+      .toBuffer();
+    if (candidate.length <= maxInstagramBlobBytes) return candidate;
+  }
+  throw new Error("Instagram poster could not be compressed below the 1.5 MB temporary-image limit");
+}
+
 export async function createTemporaryPoster(buffer: Buffer, pairId: string, language: string): Promise<TemporaryPoster> {
   validatePng(buffer);
+  const token = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = Date.now() + getSocialConfig().tempPosterTtlSeconds * 1000;
+
+  if (process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+    const upload = await instagramJpeg(buffer);
+    const pathname = `social-posters/${safePart(pairId)}-${safePart(language)}-${token}.jpg`;
+    const blob = await put(pathname, upload, {
+      access: "public",
+      addRandomSuffix: false,
+      cacheControlMaxAge: 60,
+      contentType: "image/jpeg",
+    });
+    console.log("[TemporaryPoster] Uploaded to Vercel Blob", {
+      pathname: blob.pathname,
+      sizeBytes: upload.length,
+      expiresAt: new Date(expiresAt).toISOString(),
+    });
+    return {
+      token,
+      path: blob.pathname,
+      url: blob.url,
+      storage: "blob",
+      expiresAt,
+      sizeBytes: upload.length,
+    };
+  }
+
   const directory = posterDirectory();
   await fs.mkdir(directory, { recursive: true });
-  const token = crypto.randomBytes(32).toString("base64url");
   const filePath = path.resolve(directory, `${safePart(pairId)}-${safePart(language)}-${token}.png`);
   if (!insideDirectory(filePath)) throw new Error("Temporary poster path is invalid");
-  const expiresAt = Date.now() + getSocialConfig().tempPosterTtlSeconds * 1000;
   await fs.writeFile(filePath, buffer, { flag: "wx" });
   activePosters.set(token, { path: filePath, expiresAt });
-  return { token, path: filePath, expiresAt, sizeBytes: buffer.length };
+  return { token, path: filePath, storage: "filesystem", expiresAt, sizeBytes: buffer.length };
 }
 
 export function getTemporaryPosterPath(token: string): string | null {
@@ -42,7 +89,13 @@ export async function getTemporaryPoster(token: string): Promise<{ path: string;
   catch { activePosters.delete(token); return null; }
 }
 
-export async function deleteTemporaryPoster(poster: Pick<TemporaryPoster, "token" | "path">): Promise<void> {
+export async function deleteTemporaryPoster(poster: Pick<TemporaryPoster, "token" | "path" | "url" | "storage">): Promise<void> {
+  if (poster.storage === "blob") {
+    await del(poster.url || poster.path).catch((error) => {
+      console.error("[TemporaryPoster] Vercel Blob deletion failed", error instanceof Error ? error.message : "unknown error");
+    });
+    return;
+  }
   activePosters.delete(poster.token);
   if (insideDirectory(path.resolve(poster.path))) await fs.unlink(poster.path).catch(() => undefined);
 }
@@ -63,7 +116,9 @@ export async function deleteExpiredPosters(): Promise<void> {
 
 export async function revokeTemporaryPosterToken(token: string): Promise<void> { activePosters.delete(token); }
 
-export function temporaryImageUrl(token: string): string {
+export function temporaryImageUrl(poster: TemporaryPoster | string): string {
+  if (typeof poster !== "string" && poster.storage === "blob" && poster.url) return poster.url;
+  const token = typeof poster === "string" ? poster : poster.token;
   const base = getSocialConfig().publicPosterBaseUrl.replace(/\/$/, "");
   if (!/^https:\/\//i.test(base)) throw new Error("Instagram requires the PostMaker to be deployed on a publicly accessible HTTPS domain");
   return `${base}/api/social/temp-image/${encodeURIComponent(token)}`;

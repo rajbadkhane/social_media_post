@@ -9,3 +9,6 @@ state.json
 tsconfig.tsbuildinfo
 public/*.zip
 *.log
+.agents
+skills-lock.json
+artifacts

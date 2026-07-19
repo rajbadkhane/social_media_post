@@ -31,11 +31,11 @@ export function choosePair(pairs: ArticlePair[], state: { nextLanguage: Language
 export function isPublishingComplete(results: Record<Platform, OperationPlatformResult>, mode: "ANY_SUCCESS" | "ALL_SUCCESS", dryRun: boolean): boolean { if (dryRun) return false; const enabled = Object.values(results).filter((result) => result.enabled); const successes = enabled.filter((result) => result.status === "SUCCESS").length; return mode === "ALL_SUCCESS" ? enabled.length > 0 && successes === enabled.length : successes > 0; }
 
 async function verifyTemporaryImageUrl(poster: TemporaryPoster): Promise<string> {
-  const url = temporaryImageUrl(poster.token);
+  const url = temporaryImageUrl(poster);
   const response = await fetchWithTimeout(url, {}, 10000);
   const contentType = response.headers.get("content-type") || "";
   const contentLength = Number(response.headers.get("content-length") || "0");
-  if (!response.ok || !contentType.toLowerCase().startsWith("image/png") || contentLength <= 0) throw new Error("Instagram temporary image URL did not return a valid PNG");
+  if (!response.ok || !contentType.toLowerCase().startsWith("image/") || contentLength <= 0) throw new Error("Instagram temporary image URL did not return a valid image");
   return url;
 }
 
@@ -47,21 +47,24 @@ async function publishPairUnlocked(pair: ArticlePair, expectedLanguage?: Languag
   if (dailyLimitReached(state, config.autoPublishDailyLimit)) return { complete: false, skipped: true, reason: `Daily publishing limit reached (${config.autoPublishDailyLimit})`, pairId: pair.pairId, nextLanguage: state.nextLanguage, dailyPublishedCount: dailyPublishCount(state), dailyPublishLimit: config.autoPublishDailyLimit };
   const language = state.nextLanguage;
   const article = language === "ENGLISH" ? pair.english : pair.hindi;
+  console.log("[AutoPublisher] Selected pair", { pairId: pair.pairId, articleId: article.id, language, title: article.title });
   const prepared = prepareApiArticle(article);
   if (!prepared.imageUrl) throw new Error("Selected article has no featured image");
   const articleUrl = prepared.canonicalUrl;
   const captions: Record<Platform, string> = { facebook: withUrl(prepared.captions.facebook, articleUrl), instagram: withUrl(prepared.captions.instagram, articleUrl), linkedin: withUrl(prepared.captions.linkedin, articleUrl), x: xSafe(withUrl(prepared.captions.twitter, articleUrl)) };
   const poster = await generatePoster({ headline: article.title, summary: prepared.summary, imageUrl: prepared.imageUrl, category: prepared.category, seoHashtags: prepared.seoHashtags, smoHashtags: prepared.smoHashtags, captions: { facebook: captions.facebook, instagram: captions.instagram, linkedin: captions.linkedin, twitter: captions.x }, language: languageName(language) });
+  console.log("[AutoPublisher] Poster generated", { pairId: pair.pairId, bytes: poster.length });
   const temporaryPoster = await createTemporaryPoster(poster, pair.pairId, language);
   let temporaryImageUrl: string | null = null;
   let instagramError: string | undefined;
   try {
     if (enabledPlatforms(config).includes("instagram") && !config.dryRun) {
-      try { temporaryImageUrl = await verifyTemporaryImageUrl(temporaryPoster); }
-      catch (error) { instagramError = error instanceof Error ? error.message : "Instagram temporary image preparation failed"; }
+      try { temporaryImageUrl = await verifyTemporaryImageUrl(temporaryPoster); console.log("[AutoPublisher] Temporary image ready", { pairId: pair.pairId, temporaryImageUrl }); }
+      catch (error) { instagramError = error instanceof Error ? error.message : "Instagram temporary image preparation failed"; console.error("[AutoPublisher] Temporary image failed", instagramError); }
     }
     const previous = Object.fromEntries(Object.entries(state.platformCompletions[pair.pairId] || {}).map(([platform, success]) => [platform, { enabled: true, status: success ? "SUCCESS" : "FAILURE", updatedAt: new Date().toISOString() }])) as Partial<Record<Platform, any>>;
     const results = await publishAll({ poster, temporaryImageUrl, captions, previous, dryRun: config.dryRun, instagramError, onResult: async (platform, result) => {
+      console.log("[AutoPublisher] Platform result", { pairId: pair.pairId, platform, status: result.status, postId: result.postId, error: result.error });
       if (config.dryRun || !result.enabled) return;
       state.platformCompletions[pair.pairId] = { ...(state.platformCompletions[pair.pairId] || {}), [platform]: result.status === "SUCCESS" };
       await writeState(state);
@@ -73,10 +76,12 @@ async function publishPairUnlocked(pair: ArticlePair, expectedLanguage?: Languag
       state.nextLanguage = alternate(language);
       recordDailyPublish(state);
       await writeState(state);
+      console.log("[AutoPublisher] Pair completed", { pairId: pair.pairId, nextLanguage: state.nextLanguage, dailyPublishedCount: dailyPublishCount(state) });
     }
     return { complete, pairId: pair.pairId, articleId: article.id, language, posterGenerated: true, posterDeleted: true, platformResults: results, nextLanguage: state.nextLanguage, dailyPublishedCount: dailyPublishCount(state), dailyPublishLimit: config.autoPublishDailyLimit };
   } finally {
     await deleteTemporaryPoster(temporaryPoster);
+    console.log("[AutoPublisher] Temporary poster deleted", { pairId: pair.pairId });
   }
 }
 
