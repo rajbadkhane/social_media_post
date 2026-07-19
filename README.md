@@ -13,6 +13,8 @@ Copy `.env.example` to `.env.local`, add the platform credentials and a deployed
 
 The publisher stores its only persistent state in `state.json`. It builds English/Hindi pairs from `sourceArticleId` and `translations`, selects the oldest eligible pair, posts one language per pair, alternates English/Hindi, and records each platform result so a retry cannot duplicate an already successful post. State writes are atomic and cycles use a local lock.
 
+Automatic publishing can run through `scripts/auto-publisher.js` or the protected `/api/social/run-cycle` endpoint. It will not publish more than 50 successful article cycles per India calendar day. Set `AUTO_PUBLISH_DAILY_LIMIT` to a lower value if needed; values above 50 are capped at 50.
+
 ## Production
 
 ```bash
@@ -24,3 +26,5 @@ npm run start
 Keep `state.json` on persistent storage. Do not expose `.env.local` or the state file publicly. Configure the Meta Page/Instagram permissions, LinkedIn personal profile `w_member_social` token, X OAuth media/post permissions, and a public HTTPS deployment URL before enabling automatic publishing. Generated posters exist only in `runtime-posters/` during a cycle and are deleted afterward.
 
 For a Hostinger VPS, build the app and run `pm2 start ecosystem.config.cjs`. The Next.js app serves the protected routes, while `scripts/auto-publisher.js` invokes `/api/social/run-cycle` at the configured interval. The browser never receives an access token or `AUTO_PUBLISH_SECRET`.
+
+Vercel Cron is configured in `vercel.json` for `/api/social/run-cycle`. Set `CRON_SECRET` in Vercel to let Vercel authenticate cron calls. For strict duplicate prevention on serverless hosting, use durable state storage instead of ephemeral filesystem storage.

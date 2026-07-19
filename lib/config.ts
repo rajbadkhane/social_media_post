@@ -10,8 +10,10 @@ export interface SocialConfig {
   publicSiteUrl: string;
   autoPublishEnabled: boolean;
   autoPublishIntervalSeconds: number;
+  autoPublishDailyLimit: number;
   socialSuccessMode: SocialSuccessMode;
   autoPublishSecret: string;
+  cronSecret: string;
   dryRun: boolean;
   metaGraphApiVersion: string;
   linkedInApiVersion: string;
@@ -46,8 +48,10 @@ export function getSocialConfig(): SocialConfig {
     publicSiteUrl: value("PUBLIC_SITE_URL") || value("PUBLIC_SITE_BASE_URL") || "https://www.thecliffnews.in",
     autoPublishEnabled: bool("AUTO_PUBLISH_ENABLED", false),
     autoPublishIntervalSeconds: Math.max(10, Number(value("AUTO_PUBLISH_INTERVAL_SECONDS") || "60")),
+    autoPublishDailyLimit: Math.min(50, Math.max(1, Number(value("AUTO_PUBLISH_DAILY_LIMIT") || "50"))),
     socialSuccessMode: value("SOCIAL_SUCCESS_MODE") === "ALL_SUCCESS" ? "ALL_SUCCESS" : "ANY_SUCCESS",
     autoPublishSecret: value("AUTO_PUBLISH_SECRET"),
+    cronSecret: value("CRON_SECRET"),
     dryRun: bool("SOCIAL_DRY_RUN", isDevelopment && !process.env.SOCIAL_DRY_RUN),
     metaGraphApiVersion: value("META_GRAPH_API_VERSION") || "v23.0",
     linkedInApiVersion: value("LINKEDIN_API_VERSION") || "202607",

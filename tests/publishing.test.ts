@@ -5,12 +5,12 @@ import { buildPairs, areTranslations } from "../lib/buildPairs";
 import { choosePair, isPublishingComplete } from "../lib/automaticPublisher";
 import { prepareApiArticle } from "../lib/article/prepareApiArticle";
 import { publishAll } from "../lib/publishAll";
-import { alternate, readState, withPublisherLock, writeState, type PublisherState } from "../lib/state";
+import { alternate, dailyLimitReached, dailyPublishCount, recordDailyPublish, readState, withPublisherLock, writeState, type PublisherState } from "../lib/state";
 import type { Article } from "../lib/fetchArticles";
 import { redactSecrets } from "../lib/http";
 
 const article = (id: string, language: "ENGLISH" | "HINDI", extra: Partial<Article> = {}): Article => ({ id, title: id, slug: id, language, status: "PUBLISHED", sourceArticleId: null, translations: [], excerpt: "summary", content: "content", featuredImage: "https://api.thecliffnews.in/image.png", ogImage: null, category: { name: "News" }, tags: null, metaTitle: null, metaDescription: null, publishedAt: "2026-07-19T10:00:00.000Z", createdAt: null, updatedAt: null, ...extra });
-const state = (): PublisherState => ({ nextLanguage: "ENGLISH", processedPairIds: [], platformCompletions: {} });
+const state = (): PublisherState => ({ nextLanguage: "ENGLISH", processedPairIds: [], platformCompletions: {}, dailyPublishCount: { date: "2026-07-20", count: 0 } });
 const originalEnv = { ...process.env };
 
 afterEach(() => { for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key]; for (const [key, value] of Object.entries(originalEnv)) process.env[key] = value; });
@@ -50,6 +50,16 @@ describe("safe automatic publishing", () => {
     process.env.RETRY_FAILED_PLATFORMS = "true";
     const retry = await publishAll({ poster: Buffer.from("png"), temporaryImageUrl: "https://postmaker.example/temp.png", captions: { facebook: "fb", instagram: "ig", linkedin: "li", x: "x" }, previous: results, dryRun: false, providers: { facebook: async () => { calls.push("facebook-retry"); return { postId: "bad" }; }, instagram: async () => { calls.push("instagram-retry"); throw new Error("still denied"); }, linkedin: async () => { throw new Error("unused"); }, x: async () => { throw new Error("unused"); } } });
     expect(calls).toEqual(["facebook", "instagram", "instagram-retry"]); expect(retry.facebook.status).toBe("SUCCESS");
+  });
+
+  it("tracks and enforces the daily publishing cap", () => {
+    const current = state();
+    expect(dailyPublishCount(current, "2026-07-20")).toBe(0);
+    recordDailyPublish(current, "2026-07-20");
+    expect(dailyPublishCount(current, "2026-07-20")).toBe(1);
+    current.dailyPublishCount = { date: "2026-07-20", count: 50 };
+    expect(dailyLimitReached(current, 50, "2026-07-20")).toBe(true);
+    expect(dailyLimitReached(current, 50, "2026-07-21")).toBe(false);
   });
 
   it("toggles only after success and never completes a dry run", () => {

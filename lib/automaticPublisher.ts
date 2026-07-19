@@ -1,6 +1,6 @@
 import { fetchArticles, type Language } from "./fetchArticles";
 import { buildPairs, oldestUnprocessedPair, type ArticlePair } from "./buildPairs";
-import { alternate, readState, trimProcessedPairIds, withPublisherLock, writeState, type PublisherState } from "./state";
+import { alternate, dailyLimitReached, dailyPublishCount, readState, recordDailyPublish, trimProcessedPairIds, withPublisherLock, writeState, type PublisherState } from "./state";
 import { generatePoster } from "./generatePoster";
 import { enabledPlatforms, getSocialConfig, languageName, type Platform } from "./config";
 import { publishAll } from "./publishAll";
@@ -20,6 +20,8 @@ export interface PublishingCycleResult {
   posterDeleted?: boolean;
   platformResults?: Record<Platform, OperationPlatformResult>;
   nextLanguage: Language;
+  dailyPublishedCount?: number;
+  dailyPublishLimit?: number;
 }
 
 function withUrl(caption: string, url: string): string { return `${caption}\n\n${url}`; }
@@ -42,6 +44,7 @@ async function publishPairUnlocked(pair: ArticlePair, expectedLanguage?: Languag
   const state = await readState();
   if (expectedLanguage && expectedLanguage !== state.nextLanguage) return { complete: false, skipped: true, reason: "The alternation state changed; refresh the Website API list", nextLanguage: state.nextLanguage };
   if (state.processedPairIds.includes(pair.pairId)) return { complete: true, skipped: true, reason: "Story pair was already processed", pairId: pair.pairId, nextLanguage: state.nextLanguage };
+  if (dailyLimitReached(state, config.autoPublishDailyLimit)) return { complete: false, skipped: true, reason: `Daily publishing limit reached (${config.autoPublishDailyLimit})`, pairId: pair.pairId, nextLanguage: state.nextLanguage, dailyPublishedCount: dailyPublishCount(state), dailyPublishLimit: config.autoPublishDailyLimit };
   const language = state.nextLanguage;
   const article = language === "ENGLISH" ? pair.english : pair.hindi;
   const prepared = prepareApiArticle(article);
@@ -68,9 +71,10 @@ async function publishPairUnlocked(pair: ArticlePair, expectedLanguage?: Languag
       state.processedPairIds = trimProcessedPairIds([...state.processedPairIds, pair.pairId]);
       delete state.platformCompletions[pair.pairId];
       state.nextLanguage = alternate(language);
+      recordDailyPublish(state);
       await writeState(state);
     }
-    return { complete, pairId: pair.pairId, articleId: article.id, language, posterGenerated: true, posterDeleted: true, platformResults: results, nextLanguage: state.nextLanguage };
+    return { complete, pairId: pair.pairId, articleId: article.id, language, posterGenerated: true, posterDeleted: true, platformResults: results, nextLanguage: state.nextLanguage, dailyPublishedCount: dailyPublishCount(state), dailyPublishLimit: config.autoPublishDailyLimit };
   } finally {
     await deleteTemporaryPoster(temporaryPoster);
   }
@@ -84,8 +88,9 @@ export async function runAutomaticPublishingCycle(): Promise<PublishingCycleResu
   const config = getSocialConfig();
   if (!config.autoPublishEnabled) return { complete: false, skipped: true, reason: "Automatic publishing is disabled", nextLanguage: (await readState()).nextLanguage };
   return withPublisherLock(async () => {
-    const [english, hindi] = await Promise.all([fetchArticles("ENGLISH"), fetchArticles("HINDI")]);
     const state = await readState();
+    if (dailyLimitReached(state, config.autoPublishDailyLimit)) return { complete: false, skipped: true, reason: `Daily publishing limit reached (${config.autoPublishDailyLimit})`, nextLanguage: state.nextLanguage, dailyPublishedCount: dailyPublishCount(state), dailyPublishLimit: config.autoPublishDailyLimit };
+    const [english, hindi] = await Promise.all([fetchArticles("ENGLISH"), fetchArticles("HINDI")]);
     const pair = choosePair(buildPairs(english, hindi), state);
     if (!pair) return { complete: false, skipped: true, reason: "No eligible unpublished bilingual pair", nextLanguage: state.nextLanguage };
     return publishPairUnlocked(pair);
