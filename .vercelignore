@@ -1,0 +1,11 @@
+.env*
+!.env.example
+.git
+.next
+.vercel
+node_modules
+runtime-posters
+state.json
+tsconfig.tsbuildinfo
+public/*.zip
+*.log

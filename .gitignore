@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+.vercel
+.env*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+runtime-posters
+state.json
+tsconfig.tsbuildinfo
+public/*.zip
+*.log
