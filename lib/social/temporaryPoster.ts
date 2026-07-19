@@ -9,7 +9,7 @@ const activePosters = new Map<string, { path: string; expiresAt: number }>();
 
 export interface TemporaryPoster { token: string; path: string; expiresAt: number; sizeBytes: number }
 
-function posterDirectory(): string { return path.resolve(process.env.TEMP_POSTER_DIRECTORY || path.join(process.cwd(), "runtime-posters")); }
+function posterDirectory(): string { return path.resolve(process.env.TEMP_POSTER_DIRECTORY || (process.env.VERCEL ? path.join("/tmp", "runtime-posters") : path.join(process.cwd(), "runtime-posters"))); }
 function safePart(value: string): string { return value.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120); }
 function insideDirectory(filePath: string): boolean { const root = posterDirectory(); return filePath === root || filePath.startsWith(`${root}${path.sep}`); }
 function validatePng(buffer: Buffer): void { if (buffer.length > maxPosterBytes) throw new Error("Generated poster exceeds the 8 MB limit"); if (buffer.subarray(0, 8).toString("hex") !== pngSignature) throw new Error("Generated poster is not a valid PNG"); }

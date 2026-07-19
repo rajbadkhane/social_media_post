@@ -13,7 +13,7 @@ const maxProcessedPairs = 1000;
 let writeChain = Promise.resolve();
 let inProcessLock = false;
 
-export function getStatePath(): string { return path.resolve(process.env.STATE_FILE_PATH || path.join(process.cwd(), "state.json")); }
+export function getStatePath(): string { return path.resolve(process.env.STATE_FILE_PATH || (process.env.VERCEL ? path.join("/tmp", "state.json") : path.join(process.cwd(), "state.json"))); }
 function emptyState(): PublisherState { return { nextLanguage: "ENGLISH", processedPairIds: [], platformCompletions: {} }; }
 
 function normalizeState(input: Partial<PublisherState> & { published?: Record<string, Partial<Record<Platform, any>>>; platformResults?: Record<string, Partial<Record<Platform, any>>> }): PublisherState {
