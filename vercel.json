@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/social/run-cycle",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }
