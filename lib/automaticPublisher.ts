@@ -1,6 +1,6 @@
 import { fetchArticles, type Language } from "./fetchArticles";
 import { buildPairs, oldestUnprocessedPair, type ArticlePair } from "./buildPairs";
-import { alternate, dailyLimitReached, dailyPublishCount, readState, recordDailyPublish, trimProcessedPairIds, withPublisherLock, writeState, type PublisherState } from "./state";
+import { alternate, dailyLimitReached, dailyPublishCount, durableStateConfigured, durableStateRequired, readState, recordDailyPublish, trimProcessedPairIds, withPublisherLock, writeState, type PublisherState } from "./state";
 import { generatePoster } from "./generatePoster";
 import { enabledPlatforms, getSocialConfig, languageName, type Platform } from "./config";
 import { publishAll } from "./publishAll";
@@ -86,6 +86,7 @@ export async function publishPairNow(pair: ArticlePair, expectedLanguage?: Langu
 
 export async function runAutomaticPublishingCycle(): Promise<PublishingCycleResult> {
   const config = getSocialConfig();
+  if (durableStateRequired() && !durableStateConfigured()) return { complete: false, skipped: true, reason: "Durable publisher state storage is not configured for Vercel", nextLanguage: (await readState()).nextLanguage };
   if (!config.autoPublishEnabled) return { complete: false, skipped: true, reason: "Automatic publishing is disabled", nextLanguage: (await readState()).nextLanguage };
   return withPublisherLock(async () => {
     const state = await readState();

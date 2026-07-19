@@ -28,3 +28,5 @@ Keep `state.json` on persistent storage. Do not expose `.env.local` or the state
 For a Hostinger VPS, build the app and run `pm2 start ecosystem.config.cjs`. The Next.js app serves the protected routes, while `scripts/auto-publisher.js` invokes `/api/social/run-cycle` at the configured interval. The browser never receives an access token or `AUTO_PUBLISH_SECRET`.
 
 Vercel Cron is configured in `vercel.json` for `/api/social/run-cycle`. Set `CRON_SECRET` in Vercel to let Vercel authenticate cron calls. For strict duplicate prevention on serverless hosting, use durable state storage instead of ephemeral filesystem storage.
+
+For Vercel automation, connect a Redis store from the Vercel Marketplace/Upstash and set `KV_REST_API_URL` plus `KV_REST_API_TOKEN` or `UPSTASH_REDIS_REST_URL` plus `UPSTASH_REDIS_REST_TOKEN`. The publisher uses Redis for processed pair IDs, the English/Hindi alternation state, the daily publish count, and a short lock that prevents overlapping cycles. Without durable state, Vercel automation safely skips instead of risking duplicate posts.
