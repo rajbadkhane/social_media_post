@@ -52,9 +52,9 @@ const DEVANAGARI_FONT_PATH = path.join(
   process.cwd(),
   "node_modules",
   "@fontsource",
-  "noto-sans-devanagari",
+  "anek-devanagari",
   "files",
-  "noto-sans-devanagari-devanagari-900-normal.woff2",
+  "anek-devanagari-devanagari-800-normal.woff2",
 );
 let resourcesPromise: Promise<PosterResources> | undefined;
 
@@ -251,6 +251,7 @@ function wordPath(
       const font = segment.devanagari ? resources.devanagariFont : resources.latinFont;
       const run = font.layout(segment.text);
       const scale = fontSize / font.unitsPerEm;
+      const strokeWidth = segment.devanagari ? 5.5 : 8;
       let penX = 0;
       let penY = 0;
       const paths = run.glyphs
@@ -262,7 +263,7 @@ function wordPath(
           penY += position.yAdvance;
           const pathData = glyph.path.toSVG();
           if (!pathData) return "";
-          return `<path d="${pathData}" transform="translate(${originX.toFixed(3)} ${originY.toFixed(3)}) scale(${scale.toFixed(6)} ${(-scale).toFixed(6)})" fill="${item.color}" stroke="rgba(0,0,0,0.95)" stroke-width="8" stroke-linejoin="round" paint-order="stroke fill" vector-effect="non-scaling-stroke"/>`;
+          return `<path d="${pathData}" transform="translate(${originX.toFixed(3)} ${originY.toFixed(3)}) scale(${scale.toFixed(6)} ${(-scale).toFixed(6)})" fill="${item.color}" stroke="rgba(0,0,0,0.95)" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill" vector-effect="non-scaling-stroke"/>`;
         })
         .join("");
       segmentX += (run.advanceWidth / font.unitsPerEm) * fontSize;
