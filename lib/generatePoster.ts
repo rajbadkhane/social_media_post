@@ -110,6 +110,34 @@ async function removeCornerBackground(source: Buffer, tolerance = 40): Promise<B
   return sharp(data, { raw: { width, height, channels } }).png().toBuffer();
 }
 
+async function removeLightTopBorder(source: Buffer, threshold = 100): Promise<Buffer> {
+  const { data, info } = await sharp(source)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  let borderRows = 0;
+
+  for (let y = 0; y < Math.min(height, 12); y += 1) {
+    let isLightRow = true;
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * channels;
+      if (Math.min(data[offset], data[offset + 1], data[offset + 2]) < threshold) {
+        isLightRow = false;
+        break;
+      }
+    }
+    if (!isLightRow) break;
+    borderRows += 1;
+  }
+
+  for (let y = 0; y < borderRows; y += 1) {
+    for (let x = 0; x < width; x += 1) data[(y * width + x) * channels + 3] = 0;
+  }
+
+  return sharp(data, { raw: { width, height, channels } }).png().toBuffer();
+}
+
 async function loadResources(): Promise<PosterResources> {
   const [latinFontBuffer, devanagariFontBuffer, logoSource, footer] = await Promise.all([
     readFile(LATIN_FONT_PATH),
@@ -122,7 +150,7 @@ async function loadResources(): Promise<PosterResources> {
     latinFont: asFont(create(latinFontBuffer), LATIN_FONT_PATH),
     devanagariFont: asFont(create(devanagariFontBuffer), DEVANAGARI_FONT_PATH),
     logo: await removeCornerBackground(logoSource),
-    footer,
+    footer: await removeLightTopBorder(await removeCornerBackground(footer)),
   };
 }
 
@@ -282,6 +310,70 @@ function textOverlaySvg(input: PosterInput, resources: PosterResources): string 
 </svg>`;
 }
 
+function latinTextPath(
+  value: string,
+  x: number,
+  baseline: number,
+  fontSize: number,
+  fill: string,
+  resources: PosterResources,
+): string {
+  const run = resources.latinFont.layout(value);
+  const scale = fontSize / resources.latinFont.unitsPerEm;
+  let penX = 0;
+  let penY = 0;
+
+  return run.glyphs
+    .map((glyph, index) => {
+      const position = run.positions[index];
+      const originX = x + (penX + position.xOffset) * scale;
+      const originY = baseline - (penY + position.yOffset) * scale;
+      penX += position.xAdvance;
+      penY += position.yAdvance;
+      const pathData = glyph.path.toSVG();
+      if (!pathData) return "";
+      return `<path d="${pathData}" transform="translate(${originX.toFixed(3)} ${originY.toFixed(3)}) scale(${scale.toFixed(6)} ${(-scale).toFixed(6)})" fill="${fill}"/>`;
+    })
+    .join("");
+}
+
+function badgeSvg(resources: PosterResources): string {
+  const badgeWidth = 209;
+  const badgeHeight = 61;
+  const secondBadgeTop = 72;
+  const iconScale = 43 / 24;
+  const iconX = 14;
+  const iconY = 9;
+  const textX = 68;
+  const googleIcon = `
+    <g transform="translate(${iconX} ${iconY}) scale(${iconScale})">
+      <path d="M3.18 1.27C2.8 1.5 2.57 1.93 2.57 2.5v19c0 .57.23 1 .61 1.23l.1.06 10.64-10.64v-.25L3.28 1.21l-.1.06z" fill="#00C3FF"/>
+      <path d="M17.27 15.5l-3.55-3.55v-.25l3.55-3.55.08.05 4.21 2.39c1.2.68 1.2 1.8 0 2.48l-4.21 2.39-.08.04z" fill="#FFD700"/>
+      <path d="M17.35 15.46L13.72 11.83 3.18 22.73c.4.42.99.47 1.67.09l12.5-7.36z" fill="#FF3A44"/>
+      <path d="M17.35 8.54L4.85 1.18C4.17.8 3.58.85 3.18 1.27l10.54 10.56 3.63-3.29z" fill="#32DE84"/>
+    </g>`;
+  const appleIcon = `
+    <g transform="translate(${iconX} ${secondBadgeTop + iconY}) scale(${iconScale})">
+      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.37 2.83zM13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" fill="#fff"/>
+    </g>`;
+
+  return `
+<svg width="${badgeWidth}" height="${secondBadgeTop + badgeHeight}" viewBox="0 0 ${badgeWidth} ${secondBadgeTop + badgeHeight}" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0.8" y="0.8" width="${badgeWidth - 1.6}" height="${badgeHeight - 1.6}" rx="14" fill="#000" fill-opacity="0.62" stroke="#fff" stroke-opacity="0.22" stroke-width="1.6"/>
+  <rect x="0.8" y="${secondBadgeTop + 0.8}" width="${badgeWidth - 1.6}" height="${badgeHeight - 1.6}" rx="14" fill="#000" fill-opacity="0.62" stroke="#fff" stroke-opacity="0.22" stroke-width="1.6"/>
+  ${googleIcon}
+  ${appleIcon}
+  ${latinTextPath("GET IT ON", textX, 27, 12, "#b3b3b3", resources)}
+  ${latinTextPath("Google Play", textX, 49, 21, "#fff", resources)}
+  ${latinTextPath("DOWNLOAD ON THE", textX, secondBadgeTop + 27, 11, "#b3b3b3", resources)}
+  ${latinTextPath("App Store", textX, secondBadgeTop + 49, 21, "#fff", resources)}
+</svg>`;
+}
+
+async function renderBadges(resources: PosterResources): Promise<Buffer> {
+  return sharp(Buffer.from(badgeSvg(resources), "utf8")).png().toBuffer();
+}
+
 async function renderTextOverlay(input: PosterInput, resources: PosterResources): Promise<Buffer> {
   return sharp(Buffer.from(textOverlaySvg(input, resources), "utf8")).png().toBuffer();
 }
@@ -301,12 +393,16 @@ export async function generatePoster(input: PosterInput): Promise<Buffer> {
       .resize(WIDTH, HEIGHT, { fit: "cover", position: "centre" })
       .png()
       .toBuffer();
-    const textOverlay = await renderTextOverlay(input, resources);
+    const [textOverlay, badges] = await Promise.all([
+      renderTextOverlay(input, resources),
+      renderBadges(resources),
+    ]);
 
     const poster = await sharp(background)
       .composite([
         { input: textOverlay, top: 0, left: 0 },
         { input: resources.logo, top: 24, left: 24 },
+        { input: badges, top: 26, left: WIDTH - 26 - 209 },
         { input: resources.footer, top: 1225, left: 0 },
       ])
       .png()
